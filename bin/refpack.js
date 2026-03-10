@@ -6,6 +6,7 @@ import { runAdd } from '../src/commands/add.js';
 import { runBuild } from '../src/commands/build.js';
 import { runList } from '../src/commands/list.js';
 import { runRemove } from '../src/commands/remove.js';
+import { ask } from '../src/utils/prompt.js';
 
 program
   .name('refpack')
@@ -15,9 +16,30 @@ program
 program
   .command('init <name>')
   .description('Create a new refpack project')
-  .action((name) => {
-    const packDir = path.resolve(name);
-    runInit(packDir, name);
+  .option('-y, --yes', 'Skip location confirmation')
+  .action(async (name, options) => {
+    let packDir = path.resolve(name);
+
+    if (options.yes) {
+      runInit(packDir, name);
+      return;
+    }
+
+    while (true) {
+      console.log(`\nCreate refpack at: ${packDir}`);
+      const answer = await ask('Confirm location (Y/n/path): ');
+
+      if (answer === '' || answer.toLowerCase() === 'y') {
+        runInit(packDir, name);
+        return;
+      }
+      if (answer.toLowerCase() === 'n') {
+        console.log('Cancelled.');
+        return;
+      }
+      // User entered a custom path
+      packDir = path.resolve(answer, name);
+    }
   });
 
 program
