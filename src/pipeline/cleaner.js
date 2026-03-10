@@ -89,7 +89,13 @@ function htmlToMarkdown($, root) {
       rows.each((i, row) => {
         const cells = $(row).find('th, td');
         const cellTexts = [];
-        cells.each((_, cell) => cellTexts.push(textOf($, cell)));
+        cells.each((_, cell) => {
+          const colspan = parseInt($(cell).attr('colspan') || '1', 10);
+          const text = cellTextOf($, cell);
+          cellTexts.push(text);
+          // Fill extra columns for colspan
+          for (let c = 1; c < colspan; c++) cellTexts.push('');
+        });
         lines.push(`| ${cellTexts.join(' | ')} |`);
         if (i === 0) {
           lines.push(`| ${cellTexts.map(() => '---').join(' | ')} |`);
@@ -148,6 +154,34 @@ function inlineToMarkdown($, el) {
     }
   });
   return parts.join('').replace(/\s+/g, ' ').trim();
+}
+
+function cellTextOf($, el) {
+  // Extract text content + image alt text for table cells
+  const parts = [];
+  $(el).contents().each((_, child) => {
+    if (child.type === 'text') {
+      const t = child.data.replace(/\s+/g, ' ').trim();
+      if (t) parts.push(t);
+    } else if (child.tagName === 'img') {
+      const alt = $(child).attr('alt') || $(child).attr('title') || '';
+      if (alt) parts.push(alt);
+    } else {
+      // Check for images inside nested elements
+      const imgs = $(child).find('img');
+      if (imgs.length) {
+        imgs.each((_, img) => {
+          const alt = $(img).attr('alt') || $(img).attr('title') || '';
+          if (alt) parts.push(alt);
+        });
+      }
+      const t = $(child).text().replace(/\s+/g, ' ').trim();
+      if (t && !imgs.length) parts.push(t);
+    }
+  });
+  // Deduplicate when image alt matches adjacent text (e.g., Pokemon name + sprite)
+  const deduped = parts.filter((p, i) => i === 0 || p !== parts[i - 1]);
+  return deduped.join(' ').trim();
 }
 
 function textOf($, el) {

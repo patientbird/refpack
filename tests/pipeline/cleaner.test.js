@@ -27,6 +27,17 @@ describe('cleanHtml', () => {
     expect(result).toContain('A');
     expect(result).toContain('1');
   });
+  it('handles colspan in table headers', () => {
+    const html = '<main><table><tr><th>Name</th><th colspan="2">Games</th><th>Level</th></tr><tr><td>Pikachu</td><td>Red</td><td>Blue</td><td>5</td></tr></table></main>';
+    const result = cleanHtml(html);
+    expect(result).toContain('| Name | Games |  | Level |');
+    expect(result).toContain('| Pikachu | Red | Blue | 5 |');
+  });
+  it('extracts image alt text in table cells', () => {
+    const html = '<main><table><tr><th>Pokemon</th><th>Time</th></tr><tr><td>Pidgey</td><td><img alt="Morning" src="morning.png"></td></tr></table></main>';
+    const result = cleanHtml(html);
+    expect(result).toContain('| Pidgey | Morning |');
+  });
   it('handles HTML with no main tag by using body', () => {
     const html = '<html><body><h1>Title</h1><p>Content</p></body></html>';
     const result = cleanHtml(html);
