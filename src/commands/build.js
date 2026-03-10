@@ -7,6 +7,7 @@ import { processFile, processDirectory } from '../handlers/file.js';
 import { processPdf } from '../handlers/pdf.js';
 import { writeRefs } from '../pipeline/writer.js';
 
+const CONCURRENCY = 5;
 const FETCH_DELAY_MS = 200;
 
 function formatTime(ms) {
@@ -21,6 +22,26 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function fetchBatch(urls, prefix = '  ') {
+  const results = [];
+  for (let i = 0; i < urls.length; i += CONCURRENCY) {
+    if (i > 0) await delay(FETCH_DELAY_MS);
+    const batch = urls.slice(i, i + CONCURRENCY);
+    const promises = batch.map(async (url) => {
+      console.log(`${prefix}Fetching ${url}...`);
+      try {
+        return await fetchPage(url);
+      } catch (err) {
+        console.error(`${prefix}Error fetching ${url}: ${err.message}`);
+        return null;
+      }
+    });
+    const batchResults = await Promise.all(promises);
+    results.push(...batchResults.filter(Boolean));
+  }
+  return results;
+}
+
 export async function runBuild(packDir) {
   const recipe = readRecipe(packDir);
   if (!recipe) {
@@ -31,30 +52,22 @@ export async function runBuild(packDir) {
   }
   const startTime = performance.now();
   console.log(`Building "${recipe.name}" from ${recipe.sources.length} source(s)...\n`);
+
+  // Collect all URLs to fetch, process local sources immediately
+  const urlsToFetch = [];
   const docs = [];
-  let fetchCount = 0;
+
   for (const source of recipe.sources) {
     try {
       switch (source.type) {
-        case 'url': {
-          if (fetchCount > 0) await delay(FETCH_DELAY_MS);
-          console.log(`  Fetching ${source.value}...`);
-          const result = await fetchPage(source.value);
-          docs.push(result);
-          fetchCount++;
+        case 'url':
+          urlsToFetch.push(source.value);
           break;
-        }
         case 'sitemap': {
           console.log(`  Parsing sitemap ${source.value}...`);
           const urls = await parseSitemap(source.value);
           console.log(`  Found ${urls.length} URLs in sitemap.`);
-          for (const url of urls) {
-            if (fetchCount > 0) await delay(FETCH_DELAY_MS);
-            console.log(`    Fetching ${url}...`);
-            const result = await fetchPage(url);
-            docs.push(result);
-            fetchCount++;
-          }
+          urlsToFetch.push(...urls);
           break;
         }
         case 'file': {
@@ -83,6 +96,14 @@ export async function runBuild(packDir) {
       console.error(`  Error processing ${source.value}: ${err.message}`);
     }
   }
+
+  // Fetch all URLs concurrently in batches
+  if (urlsToFetch.length > 0) {
+    console.log(`  Fetching ${urlsToFetch.length} pages (${CONCURRENCY} at a time)...\n`);
+    const fetched = await fetchBatch(urlsToFetch, '    ');
+    docs.push(...fetched);
+  }
+
   if (docs.length === 0) {
     console.log('\nNo documents were successfully processed.');
     return;
