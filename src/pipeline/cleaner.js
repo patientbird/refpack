@@ -5,14 +5,15 @@ export function cleanHtml(html) {
 
   // Remove boilerplate elements
   $('nav, header, footer, script, style, aside, noscript, svg').remove();
-  $('.sidebar, .menu, .navigation, .breadcrumb, .toc').remove();
+  $('.sidebar, .menu, .navigation, .breadcrumb, .toc, [class*="sidebar"], [class*="nav-"]').remove();
 
   // Remove copy/share buttons and their containers
   $('button').remove();
   $('[role="button"]').remove();
-  $('span').filter((_, el) => {
-    const text = $(el).text().trim();
-    return text === 'Copy' || text === 'Copy page';
+  // Remove "Copy" tooltips/labels (common in Mintlify, React docs, etc.)
+  $('div, span').filter((_, el) => {
+    const text = $(el).clone().children().remove().end().text().trim();
+    return text === 'Copy' || text === 'Copy page' || text === 'Copied!';
   }).remove();
 
   // Normalize code blocks: convert div-per-line (CodeMirror/Sandpack) to newlines
@@ -20,11 +21,30 @@ export function cleanHtml(html) {
     $(div).replaceWith($(div).text() + '\n');
   });
 
-  let root = $('main').first();
-  if (!root.length) root = $('article').first();
-  if (!root.length) root = $('body').first();
+  let root = findContentRoot($);
   const md = htmlToMarkdown($, root);
   return normalizeMarkdown(md);
+}
+
+// Content container selectors, ordered from most specific to least.
+// Each doc framework uses different conventions — we try them all.
+const CONTENT_SELECTORS = [
+  '.mdx-content',         // Mintlify (Ollama, many API docs)
+  '.markdown-body',       // GitHub-style markdown
+  '[class*="prose"]',     // Tailwind Typography (widespread)
+  '.doc-content',         // Generic doc sites
+  '.content',             // Common CMS pattern
+  '[role="main"]',        // ARIA landmark
+  'main',                 // Semantic HTML
+  'article',              // Semantic HTML
+];
+
+function findContentRoot($) {
+  for (const selector of CONTENT_SELECTORS) {
+    const el = $(selector).first();
+    if (el.length && el.text().trim().length > 50) return el;
+  }
+  return $('body').first();
 }
 
 function htmlToMarkdown($, root) {
@@ -44,7 +64,7 @@ function htmlToMarkdown($, root) {
     if (tag === 'h4') { lines.push(`\n#### ${textOf($, el)}\n`); return; }
     if (tag === 'h5') { lines.push(`\n##### ${textOf($, el)}\n`); return; }
     if (tag === 'h6') { lines.push(`\n###### ${textOf($, el)}\n`); return; }
-    if (tag === 'p') { lines.push(`\n${textOf($, el)}\n`); return; }
+    if (tag === 'p' || tag === 'span') { lines.push(`\n${inlineToMarkdown($, el)}\n`); return; }
     if (tag === 'pre') {
       const code = ($(el).find('code').text() || $(el).text()).trimEnd();
       lines.push(`\n\`\`\`\n${code}\n\`\`\`\n`);
@@ -107,6 +127,27 @@ function walkList($, listEl, lines, depth) {
       });
     }
   });
+}
+
+function inlineToMarkdown($, el) {
+  const parts = [];
+  $(el).contents().each((_, child) => {
+    if (child.type === 'text') {
+      parts.push(child.data.replace(/\s+/g, ' '));
+    } else if (child.tagName === 'code') {
+      parts.push(`\`${$(child).text().trim()}\``);
+    } else if (child.tagName === 'a') {
+      const href = $(child).attr('href') || '';
+      parts.push(`[${$(child).text().trim()}](${href})`);
+    } else if (child.tagName === 'strong' || child.tagName === 'b') {
+      parts.push(`**${$(child).text().trim()}**`);
+    } else if (child.tagName === 'em' || child.tagName === 'i') {
+      parts.push(`*${$(child).text().trim()}*`);
+    } else {
+      parts.push($(child).text().replace(/\s+/g, ' '));
+    }
+  });
+  return parts.join('').replace(/\s+/g, ' ').trim();
 }
 
 function textOf($, el) {

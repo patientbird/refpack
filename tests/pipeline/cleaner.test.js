@@ -33,6 +33,30 @@ describe('cleanHtml', () => {
     expect(result).toContain('# Title');
     expect(result).toContain('Content');
   });
+  it('finds content in mdx-content container (Mintlify sites)', () => {
+    const html = `<html><body>
+      <div class="sidebar-group-header">Sidebar nav here</div>
+      <div class="mdx-content"><h1>API Docs</h1><p>Actual content here.</p></div>
+    </body></html>`;
+    const result = cleanHtml(html);
+    expect(result).toContain('# API Docs');
+    expect(result).toContain('Actual content here.');
+    expect(result).not.toContain('Sidebar nav');
+  });
+  it('finds content in prose container (Tailwind sites)', () => {
+    const html = `<html><body>
+      <nav>Nav stuff</nav>
+      <div class="prose dark:prose-invert"><h1>Guide</h1><p>Guide content.</p></div>
+    </body></html>`;
+    const result = cleanHtml(html);
+    expect(result).toContain('# Guide');
+    expect(result).toContain('Guide content.');
+  });
+  it('preserves inline code and links in paragraphs', () => {
+    const html = '<main><p>Run <code>ollama</code> in your <a href="/docs">terminal</a> now.</p></main>';
+    const result = cleanHtml(html);
+    expect(result).toContain('Run `ollama` in your [terminal](/docs) now.');
+  });
   it('removes copy/share buttons', () => {
     const html = '<main><h1>Title</h1><button>Copy</button><span>Copy page</span><p>Content</p></main>';
     const result = cleanHtml(html);
