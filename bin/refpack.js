@@ -46,8 +46,10 @@ program
   .command('add <source>')
   .description('Add a source (URL, file, or directory)')
   .option('--sitemap', 'Treat the URL as a sitemap')
-  .action((source, options) => {
-    runAdd(process.cwd(), source, options);
+  .option('--single', 'Add only this URL, skip auto-discovery')
+  .option('-y, --yes', 'Skip confirmation prompt')
+  .action(async (source, options) => {
+    await runAdd(process.cwd(), source, options);
   });
 
 program

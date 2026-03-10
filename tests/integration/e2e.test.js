@@ -37,11 +37,11 @@ describe('refpack end-to-end', () => {
     runInit(packDir, 'my-docs');
     expect(fs.existsSync(path.join(packDir, 'recipe.json'))).toBe(true);
 
-    runAdd(packDir, 'https://example.com/docs/api', {});
+    await runAdd(packDir, 'https://example.com/docs/api', { single: true });
 
     const localFile = path.join(baseDir, 'notes.md');
     fs.writeFileSync(localFile, '# My Notes\n\nImportant stuff.');
-    runAdd(packDir, localFile, {});
+    await runAdd(packDir, localFile, {});
 
     const sources = runList(packDir);
     expect(sources).toHaveLength(2);
