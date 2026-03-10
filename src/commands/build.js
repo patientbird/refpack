@@ -15,6 +15,7 @@ export async function runBuild(packDir) {
   if (recipe.sources.length === 0) {
     throw new Error('No sources added. Run "refpack add <source>" first.');
   }
+  const startTime = performance.now();
   console.log(`Building "${recipe.name}" from ${recipe.sources.length} source(s)...\n`);
   const docs = [];
   for (const source of recipe.sources) {
@@ -71,6 +72,7 @@ export async function runBuild(packDir) {
   const manifest = generateManifest(packDir, recipe.name);
   manifest.sources = recipe.sources.length;
   writeManifest(packDir, manifest);
-  console.log(`\nDone! ${docs.length} file(s) written to refs/`);
+  const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
+  console.log(`\nDone! ${docs.length} file(s) written to refs/ in ${elapsed}s`);
   console.log(`Manifest written to refpack.json`);
 }

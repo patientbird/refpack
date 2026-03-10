@@ -37,8 +37,10 @@ export async function runAdd(packDir, source, options = {}) {
 }
 
 async function addWithDiscovery(packDir, recipe, url, options) {
+  const startTime = performance.now();
   console.log(`\nDiscovering pages at ${url}...`);
   const { urls, method } = await discoverPages(url);
+  const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
 
   if (urls.length === 0) {
     // No pages found — just add the single URL
@@ -57,7 +59,7 @@ async function addWithDiscovery(packDir, recipe, url, options) {
   }
 
   // Multiple pages found — confirm with user
-  console.log(`Found ${urls.length} pages (via ${method}):\n`);
+  console.log(`Found ${urls.length} pages via ${method} in ${elapsed}s\n`);
 
   // Show a preview (first 10 + count of remaining)
   const preview = urls.slice(0, 10);
