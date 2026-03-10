@@ -91,7 +91,10 @@ function htmlToMarkdown($, root) {
         const cellTexts = [];
         cells.each((_, cell) => {
           const colspan = parseInt($(cell).attr('colspan') || '1', 10);
-          const text = cellTextOf($, cell);
+          const cls = $(cell).attr('class') || '';
+          // Skip cells marked as inactive/blank via CSS
+          const isInactive = /\b(blank|inactive|disabled)\b/.test(cls);
+          const text = isInactive ? '' : cellTextOf($, cell);
           cellTexts.push(text);
           // Fill extra columns for colspan
           for (let c = 1; c < colspan; c++) cellTexts.push('');
