@@ -41,6 +41,7 @@ async function addWithDiscovery(packDir, recipe, url, options) {
   console.log(`\nDiscovering pages at ${url}...`);
   const { urls, method } = await discoverPages(url);
   const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
+  // Keep discover timing in seconds since it's usually quick
 
   if (urls.length === 0) {
     // No pages found — just add the single URL
