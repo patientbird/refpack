@@ -2,7 +2,24 @@ import * as cheerio from 'cheerio';
 
 export function cleanHtml(html) {
   const $ = cheerio.load(html);
-  $('nav, header, footer, script, style, aside, .sidebar, .menu, .navigation').remove();
+
+  // Remove boilerplate elements
+  $('nav, header, footer, script, style, aside, noscript, svg').remove();
+  $('.sidebar, .menu, .navigation, .breadcrumb, .toc').remove();
+
+  // Remove copy/share buttons and their containers
+  $('button').remove();
+  $('[role="button"]').remove();
+  $('span').filter((_, el) => {
+    const text = $(el).text().trim();
+    return text === 'Copy' || text === 'Copy page';
+  }).remove();
+
+  // Normalize code blocks: convert div-per-line (CodeMirror/Sandpack) to newlines
+  $('pre code div').each((_, div) => {
+    $(div).replaceWith($(div).text() + '\n');
+  });
+
   let root = $('main').first();
   if (!root.length) root = $('article').first();
   if (!root.length) root = $('body').first();
@@ -29,7 +46,7 @@ function htmlToMarkdown($, root) {
     if (tag === 'h6') { lines.push(`\n###### ${textOf($, el)}\n`); return; }
     if (tag === 'p') { lines.push(`\n${textOf($, el)}\n`); return; }
     if (tag === 'pre') {
-      const code = $(el).find('code').text() || $(el).text();
+      const code = ($(el).find('code').text() || $(el).text()).trimEnd();
       lines.push(`\n\`\`\`\n${code}\n\`\`\`\n`);
       return;
     }
@@ -43,12 +60,7 @@ function htmlToMarkdown($, root) {
       return;
     }
     if (tag === 'ul' || tag === 'ol') {
-      children.forEach((child, i) => {
-        if (child.tagName === 'li') {
-          const prefix = tag === 'ol' ? `${i + 1}. ` : '- ';
-          lines.push(`${prefix}${textOf($, child)}`);
-        }
-      });
+      walkList($, el, lines, 0);
       lines.push('');
       return;
     }
@@ -72,10 +84,38 @@ function htmlToMarkdown($, root) {
   return lines.join('\n');
 }
 
+function walkList($, listEl, lines, depth) {
+  const tag = listEl.tagName || $(listEl).prop('tagName')?.toLowerCase();
+  const indent = '  '.repeat(depth);
+  const children = listEl.children || $(listEl).contents().toArray();
+  let itemIndex = 0;
+  children.forEach((child) => {
+    if (child.tagName === 'li') {
+      itemIndex++;
+      const prefix = tag === 'ol' ? `${itemIndex}. ` : '- ';
+      // Get direct text of the li (excluding nested lists)
+      const liText = $(child).contents().toArray()
+        .filter(c => c.tagName !== 'ul' && c.tagName !== 'ol')
+        .map(c => $(c).text())
+        .join('')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (liText) lines.push(`${indent}${prefix}${liText}`);
+      // Recurse into nested lists
+      $(child).children('ul, ol').each((_, nested) => {
+        walkList($, nested, lines, depth + 1);
+      });
+    }
+  });
+}
+
 function textOf($, el) {
   return $(el).text().replace(/\s+/g, ' ').trim();
 }
 
 export function normalizeMarkdown(md) {
-  return md.replace(/\n{3,}/g, '\n\n').trim();
+  let result = md.replace(/\n{3,}/g, '\n\n').trim();
+  // Strip leading breadcrumb-style lines (bare markdown links before the first heading)
+  result = result.replace(/^(\[.*?\]\(.*?\)\s*\n)+/, '');
+  return result.trim();
 }
