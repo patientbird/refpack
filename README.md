@@ -44,6 +44,14 @@ amazon-advertising/
 └── refs/             # Clean markdown files
 ```
 
+## Roadmap
+
+- **v0.1** (current) — CLI tool, web/PDF/file sources, auto-discovery, concurrent fetching
+- **v0.2** — Registry: publish, install, and search shared recipes
+- **v0.3** — Image support (`--include-images`): download charts/diagrams for vision-capable LLMs
+- **v0.4** — Desktop wrapper: GUI for non-CLI users (paste URL, click Build)
+- **Future** — GitHub source type, deduplication, pre-chunked output, change tracking
+
 ## License
 
 MIT

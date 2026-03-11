@@ -17,6 +17,7 @@ describe('fetchPage', () => {
     const { default: fetch } = await import('node-fetch');
     fetch.mockResolvedValue({
       ok: true,
+      headers: { get: (h) => h === 'content-type' ? 'text/html; charset=utf-8' : null },
       text: () => Promise.resolve(html),
     });
     const result = await fetchPage('https://example.com/docs/sponsored-products');

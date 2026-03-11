@@ -2,6 +2,9 @@ import fetch from 'node-fetch';
 import * as cheerio from 'cheerio';
 import { parseSitemap } from './sitemap.js';
 
+const USER_AGENT = 'refpack/0.1.0';
+const CRAWL_DELAY_MS = 100;
+
 /**
  * Discover all pages under a given URL.
  * Strategy:
@@ -57,7 +60,11 @@ async function crawlLinks(startUrl, origin, basePath, maxDepth = 2) {
     if (depth >= maxDepth) continue;
 
     try {
-      const response = await fetch(url, { timeout: 10000 });
+      if (visited.size > 1) await new Promise(r => setTimeout(r, CRAWL_DELAY_MS));
+      const response = await fetch(url, {
+        timeout: 10000,
+        headers: { 'User-Agent': USER_AGENT },
+      });
       if (!response.ok) continue;
       const contentType = response.headers.get('content-type') || '';
       if (!contentType.includes('text/html')) continue;

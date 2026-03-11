@@ -7,15 +7,16 @@ import { processFile, processDirectory } from '../handlers/file.js';
 import { processPdf } from '../handlers/pdf.js';
 import { writeRefs } from '../pipeline/writer.js';
 
-const CONCURRENCY = 5;
-const FETCH_DELAY_MS = 200;
+const CONCURRENCY = 10;
+const FETCH_DELAY_MS = 100;
 
 function formatTime(ms) {
   const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
   const pad = (n) => String(n).padStart(2, '0');
-  return `${pad(0)}:${pad(minutes)}:${pad(seconds)}`;
+  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
 }
 
 function delay(ms) {

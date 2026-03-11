@@ -5,7 +5,7 @@ export function cleanHtml(html) {
 
   // Remove boilerplate elements
   $('nav, header, footer, script, style, aside, noscript, svg').remove();
-  $('.sidebar, .menu, .navigation, .breadcrumb, .toc, [class*="sidebar"], [class*="nav-"]').remove();
+  $('.sidebar, .menu, .navigation, .breadcrumb, .toc, [class*="sidebar"]').remove();
 
   // Remove copy/share buttons and their containers
   $('button').remove();
@@ -161,29 +161,29 @@ function inlineToMarkdown($, el) {
 
 function cellTextOf($, el) {
   // Extract text content + image alt text for table cells
+  // Recurse into children individually to get fine-grained parts for dedup
   const parts = [];
-  $(el).contents().each((_, child) => {
-    if (child.type === 'text') {
-      const t = child.data.replace(/\s+/g, ' ').trim();
-      if (t) parts.push(t);
-    } else if (child.tagName === 'img') {
-      const alt = $(child).attr('alt') || $(child).attr('title') || '';
-      if (alt) parts.push(alt);
-    } else {
-      // Check for images inside nested elements
-      const imgs = $(child).find('img');
-      if (imgs.length) {
-        imgs.each((_, img) => {
-          const alt = $(img).attr('alt') || $(img).attr('title') || '';
-          if (alt) parts.push(alt);
-        });
+  function extractParts(node) {
+    $(node).contents().each((_, child) => {
+      if (child.type === 'text') {
+        const t = child.data.replace(/\s+/g, ' ').trim();
+        if (t) parts.push(t);
+      } else if (child.tagName === 'img') {
+        const alt = $(child).attr('alt') || $(child).attr('title') || '';
+        if (alt) parts.push(alt);
+      } else if (child.tagName === 'br') {
+        // skip line breaks
+      } else {
+        // Recurse into child elements (spans, links, small, etc.)
+        extractParts(child);
       }
-      const t = $(child).text().replace(/\s+/g, ' ').trim();
-      if (t && !imgs.length) parts.push(t);
-    }
+    });
+  }
+  extractParts(el);
+  // Remove parts that are substrings of another part (keep the most descriptive)
+  const deduped = parts.filter((p) => {
+    return !parts.some((other) => other !== p && other.includes(p));
   });
-  // Deduplicate when image alt matches adjacent text (e.g., Pokemon name + sprite)
-  const deduped = parts.filter((p, i) => i === 0 || p !== parts[i - 1]);
   return deduped.join(' ').trim();
 }
 
