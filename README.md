@@ -47,9 +47,9 @@ amazon-advertising/
 ## Roadmap
 
 - **v0.1** (current) — CLI tool, web/PDF/file sources, auto-discovery, concurrent fetching
-- **v0.2** — Registry: publish, install, and search shared recipes
-- **v0.3** — Image support (`--include-images`): download charts/diagrams for vision-capable LLMs
-- **v0.4** — Desktop wrapper: GUI for non-CLI users (paste URL, click Build)
+- **v0.2** — IDE integrations: VS Code extension, Claude Code plugin (auto-load refpacks as context)
+- **v0.3** — Registry: publish, install, and search shared recipes (`refpack install react-docs`)
+- **v0.4** — Image support (`--include-images`): download charts/diagrams for vision-capable LLMs
 - **Future** — GitHub source type, deduplication, pre-chunked output, change tracking
 
 ## License
