@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>refpack</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header>
+    <div class="logo">R</div>
+    <span class="title">refpack</span>
+  </header>
+
+  <section class="section">
+    <div class="label">Markdown</div>
+    <div class="btn-row">
+      <button id="btn-copy" class="btn primary">Copy</button>
+      <button id="btn-save-page" class="btn">Save Page</button>
+      <button id="btn-save-group" class="btn count">Save Group <span id="group-count"></span></button>
+    </div>
+  </section>
+
+  <section class="section" id="llms-section">
+    <div class="label">llms.txt <span id="llms-dot" class="dot"></span></div>
+    <div class="btn-row">
+      <button id="btn-llms-copy" class="btn primary" disabled>Copy</button>
+      <button id="btn-llms-save" class="btn" disabled>Save</button>
+    </div>
+  </section>
+
+  <div id="status" class="status" hidden></div>
+
+  <script src="../lib/turndown.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
