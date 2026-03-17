@@ -44,60 +44,35 @@ function sendMessage(msg) {
   return new Promise(resolve => chrome.runtime.sendMessage(msg, resolve));
 }
 
-async function saveFile(content, suggestedName) {
-  // Use File System Access API to avoid Windows "untrusted source" warning
+// Get a file handle immediately (must be called in user gesture context, before async work)
+async function getFileHandle(suggestedName, mimeType, ext) {
   try {
-    const handle = await window.showSaveFilePicker({
+    return await window.showSaveFilePicker({
       suggestedName,
-      types: [{
-        description: 'Markdown',
-        accept: { 'text/markdown': ['.md'] },
-      }],
+      types: [{ description: ext.toUpperCase() + ' file', accept: { [mimeType]: ['.' + ext] } }],
     });
-    const writable = await handle.createWritable();
-    await writable.write(content);
-    await writable.close();
-    return true;
   } catch (err) {
-    // User cancelled the dialog
-    if (err.name === 'AbortError') return false;
-    // API not available — fallback to anchor download
-    const blob = new Blob([content], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = suggestedName;
-    a.click();
-    URL.revokeObjectURL(url);
-    return true;
+    if (err.name === 'AbortError') return null;
+    return 'fallback';
   }
 }
 
-async function saveFileRaw(content, suggestedName, mimeType) {
-  try {
-    const ext = suggestedName.split('.').pop();
-    const handle = await window.showSaveFilePicker({
-      suggestedName,
-      types: [{
-        description: ext.toUpperCase() + ' file',
-        accept: { [mimeType]: ['.' + ext] },
-      }],
-    });
-    const writable = await handle.createWritable();
-    await writable.write(content);
-    await writable.close();
-    return true;
-  } catch (err) {
-    if (err.name === 'AbortError') return false;
-    const blob = new Blob([content], { type: mimeType });
+async function writeToHandle(handle, content, fallbackName) {
+  if (handle === 'fallback' || !handle) {
+    if (!handle) return; // user cancelled
+    // Fallback: anchor download
+    const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = suggestedName;
+    a.download = fallbackName;
     a.click();
     URL.revokeObjectURL(url);
-    return true;
+    return;
   }
+  const writable = await handle.createWritable();
+  await writable.write(content);
+  await writable.close();
 }
 
 // ─── HTML-to-Markdown in popup context (port of CLI cleaner.js) ─────────────
@@ -290,13 +265,18 @@ btnCopy.addEventListener('click', async () => {
 });
 
 btnSavePage.addEventListener('click', async () => {
+  // Get file handle FIRST while user gesture is active
+  const title = currentTab.title || 'page';
+  const filename = slugify(title) + '.md';
+  const handle = await getFileHandle(filename, 'text/markdown', 'md');
+  if (!handle) return; // user cancelled
+
   btnSavePage.disabled = true;
   try {
     const resp = await sendMessage({ action: 'injectAndConvert', tabId: currentTab.id });
     if (resp && resp.error) { showStatus(resp.error, true); return; }
-    const filename = slugify(resp.title || 'page') + '.md';
-    const saved = await saveFile(resp.markdown, filename);
-    if (saved) flashButton(btnSavePage, 'Saved!');
+    await writeToHandle(handle, resp.markdown, filename);
+    flashButton(btnSavePage, 'Saved!');
   } finally { btnSavePage.disabled = false; }
 });
 
@@ -305,6 +285,15 @@ btnSaveGroup.addEventListener('click', async () => {
     showStatus('No related pages found', true);
     return;
   }
+
+  // Get file handle FIRST while user gesture is active
+  const parsedUrl = new URL(currentTab.url);
+  const domain = parsedUrl.hostname.replace('www.', '');
+  const firstSeg = parsedUrl.pathname.split('/').filter(Boolean)[0] || '';
+  const filenameBase = firstSeg ? domain + '-' + firstSeg : domain;
+  const filename = slugify(filenameBase) + '.md';
+  const handle = await getFileHandle(filename, 'text/markdown', 'md');
+  if (!handle) return; // user cancelled
 
   const originalText = btnSaveGroup.textContent;
   btnSaveGroup.disabled = true;
@@ -328,19 +317,12 @@ btnSaveGroup.addEventListener('click', async () => {
     if (sections.length === 0) { showStatus('Failed to convert any pages', true); return; }
 
     const bundled = sections.join('\n\n---\n\n');
-    const parsedUrl = new URL(currentTab.url);
-    const domain = parsedUrl.hostname.replace('www.', '');
-    const firstSeg = parsedUrl.pathname.split('/').filter(Boolean)[0] || '';
-    const filenameBase = firstSeg ? domain + '-' + firstSeg : domain;
+    await writeToHandle(handle, bundled, filename);
 
-    const saved = await saveFile(bundled, slugify(filenameBase) + '.md');
-
-    if (saved) {
-      if (failCount > 0) {
-        showStatus('Saved ' + sections.length + ' of ' + resp.results.length + ' pages');
-      } else {
-        flashButton(btnSaveGroup, 'Saved!');
-      }
+    if (failCount > 0) {
+      showStatus('Saved ' + sections.length + ' of ' + resp.results.length + ' pages');
+    } else {
+      flashButton(btnSaveGroup, 'Saved!');
     }
   } finally {
     btnSaveGroup.textContent = originalText;
@@ -360,13 +342,18 @@ btnLlmsCopy.addEventListener('click', async () => {
 });
 
 btnLlmsSave.addEventListener('click', async () => {
+  // Get file handle FIRST while user gesture is active
+  const domain = new URL(currentTab.url).hostname.replace('www.', '');
+  const filename = domain + '-llms.txt';
+  const handle = await getFileHandle(filename, 'text/plain', 'txt');
+  if (!handle) return;
+
   btnLlmsSave.disabled = true;
   try {
     const origin = new URL(currentTab.url).origin;
     const resp = await sendMessage({ action: 'fetchLlmsTxt', origin });
     if (resp && resp.error) { showStatus('Failed to fetch llms.txt', true); return; }
-    const domain = new URL(currentTab.url).hostname.replace('www.', '');
-    await saveFileRaw(resp.content, domain + '-llms.txt', 'text/plain');
+    await writeToHandle(handle, resp.content, filename);
     flashButton(btnLlmsSave, 'Saved!');
   } finally { btnLlmsSave.disabled = false; }
 });
