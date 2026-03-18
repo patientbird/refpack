@@ -4,10 +4,18 @@
 
 const btnCopy = document.getElementById('btn-copy');
 const btnSavePage = document.getElementById('btn-save-page');
-const btnSaveGroup = document.getElementById('btn-save-group');
+const btnSaveGroupMd = document.getElementById('btn-save-group-md');
+const btnSaveGroupZip = document.getElementById('btn-save-group-zip');
 const btnLlmsCopy = document.getElementById('btn-llms-copy');
 const btnLlmsSave = document.getElementById('btn-llms-save');
 const groupCount = document.getElementById('group-count');
+const groupSection = document.getElementById('group-section');
+const progressRow = document.getElementById('progress-row');
+const progressBarWrap = document.getElementById('progress-bar-wrap');
+const progressFill = document.getElementById('progress-fill');
+const progressText = document.getElementById('progress-text');
+const btnPause = document.getElementById('btn-pause');
+const btnCancel = document.getElementById('btn-cancel');
 const llmsDot = document.getElementById('llms-dot');
 const llmsSection = document.getElementById('llms-section');
 const statusEl = document.getElementById('status');
@@ -19,11 +27,11 @@ let discoveredUrls = [];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function showStatus(text, isError = false) {
+function showStatus(text, type = 'info') {
   statusEl.textContent = text;
-  statusEl.className = isError ? 'status error' : 'status';
+  statusEl.className = 'status' + (type === 'error' ? ' error' : type === 'warning' ? ' warning' : '');
   statusEl.hidden = false;
-  setTimeout(() => { statusEl.hidden = true; }, 3000);
+  setTimeout(() => { statusEl.hidden = true; }, 4000);
 }
 
 function flashButton(btn, text) {
@@ -242,14 +250,50 @@ async function init() {
     }
   } catch { llmsSection.classList.add('unavailable'); }
 
-  // Discover group pages (sitemap + crawl, like CLI)
+  // Check if there's an in-progress group fetch from a previous popup open
+  resumeGroupProgress();
+
+  // Discover group pages by extracting links directly from the page DOM
+  groupCount.textContent = 'scanning...';
+  btnSaveGroupMd.disabled = true;
+  btnSaveGroupZip.disabled = true;
   try {
-    const resp = await sendMessage({ action: 'discoverPages', baseUrl: tab.url });
-    if (resp && resp.urls && resp.urls.length > 0) {
-      discoveredUrls = resp.urls;
-      groupCount.textContent = '(' + discoveredUrls.length + ')';
+    const tabUrl = new URL(tab.url);
+    const basePath = tabUrl.pathname.replace(/\/+$/, '') || '/';
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (basePath) => {
+        const seen = new Set();
+        const currentPath = location.pathname.replace(/\/+$/, '') || '/';
+        const currentNorm = location.origin + currentPath;
+        document.querySelectorAll('a[href]').forEach(a => {
+          try {
+            const u = new URL(a.href);
+            if (u.origin !== location.origin) return;
+            const p = u.pathname.replace(/\/+$/, '') || '/';
+            if (!(p.startsWith(basePath + '/') || p === basePath)) return;
+            const norm = u.origin + p;
+            if (norm !== currentNorm) seen.add(norm);
+          } catch {}
+        });
+        return [...seen].sort();
+      },
+      args: [basePath],
+    });
+    const links = results && results[0] && results[0].result;
+    if (links && links.length > 0) {
+      discoveredUrls = links;
+      groupCount.textContent = links.length + ' pages';
+      btnSaveGroupMd.disabled = false;
+      btnSaveGroupZip.disabled = false;
+    } else {
+      groupCount.textContent = 'no related pages';
+      groupSection.classList.add('unavailable');
     }
-  } catch { /* silent */ }
+  } catch (err) {
+    groupCount.textContent = 'scan failed';
+    groupSection.classList.add('unavailable');
+  }
 }
 
 // ─── Button Handlers ─────────────────────────────────────────────────────────
@@ -258,7 +302,7 @@ btnCopy.addEventListener('click', async () => {
   btnCopy.disabled = true;
   try {
     const resp = await sendMessage({ action: 'injectAndConvert', tabId: currentTab.id });
-    if (resp && resp.error) { showStatus(resp.error, true); return; }
+    if (resp && resp.error) { showStatus(resp.error, 'error'); return; }
     await navigator.clipboard.writeText(resp.markdown);
     flashButton(btnCopy, 'Copied!');
   } finally { btnCopy.disabled = false; }
@@ -274,60 +318,275 @@ btnSavePage.addEventListener('click', async () => {
   btnSavePage.disabled = true;
   try {
     const resp = await sendMessage({ action: 'injectAndConvert', tabId: currentTab.id });
-    if (resp && resp.error) { showStatus(resp.error, true); return; }
+    if (resp && resp.error) { showStatus(resp.error, 'error'); return; }
     await writeToHandle(handle, resp.markdown, filename);
     flashButton(btnSavePage, 'Saved!');
   } finally { btnSavePage.disabled = false; }
 });
 
-btnSaveGroup.addEventListener('click', async () => {
-  if (discoveredUrls.length === 0) {
-    showStatus('No related pages found', true);
-    return;
-  }
-
-  // Get file handle FIRST while user gesture is active
+function groupFilenameBase() {
   const parsedUrl = new URL(currentTab.url);
   const domain = parsedUrl.hostname.replace('www.', '');
   const firstSeg = parsedUrl.pathname.split('/').filter(Boolean)[0] || '';
-  const filenameBase = firstSeg ? domain + '-' + firstSeg : domain;
-  const filename = slugify(filenameBase) + '.md';
-  const handle = await getFileHandle(filename, 'text/markdown', 'md');
-  if (!handle) return; // user cancelled
+  return firstSeg ? domain + '-' + firstSeg : domain;
+}
 
-  const originalText = btnSaveGroup.textContent;
-  btnSaveGroup.disabled = true;
-  btnSaveGroup.textContent = 'Saving ' + discoveredUrls.length + ' pages...';
-
-  try {
-    const resp = await sendMessage({ action: 'fetchPages', urls: discoveredUrls });
-    if (!resp || !resp.results) { showStatus('Failed to fetch pages', true); return; }
-
-    const sections = [];
-    let failCount = 0;
-
-    for (const result of resp.results) {
-      if (result.error) { failCount++; continue; }
-      try {
-        const converted = convertHtmlString(result.html, result.url);
-        sections.push('# ' + converted.title + '\n\n> Source: ' + result.url + '\n\n' + converted.markdown);
-      } catch { failCount++; }
-    }
-
-    if (sections.length === 0) { showStatus('Failed to convert any pages', true); return; }
-
-    const bundled = sections.join('\n\n---\n\n');
-    await writeToHandle(handle, bundled, filename);
-
-    if (failCount > 0) {
-      showStatus('Saved ' + sections.length + ' of ' + resp.results.length + ' pages');
-    } else {
-      flashButton(btnSaveGroup, 'Saved!');
-    }
-  } finally {
-    btnSaveGroup.textContent = originalText;
-    btnSaveGroup.disabled = false;
+// Convert raw fetch results to markdown pages
+function convertResults(results) {
+  const pages = [];
+  let failCount = 0;
+  for (const r of results) {
+    if (r.error) { failCount++; continue; }
+    try {
+      const converted = convertHtmlString(r.html, r.url);
+      const urlPath = new URL(r.url).pathname.replace(/\/+$/, '');
+      const slug = urlPath.split('/').filter(Boolean).pop() || 'index';
+      pages.push({ title: converted.title, markdown: converted.markdown, url: r.url, slug });
+    } catch { failCount++; }
   }
+  return { pages, failCount, total: results.length };
+}
+
+// Build final .md or .zip content and trigger download. Returns true on success.
+async function buildAndDownload(result, format, filename) {
+  let blob;
+  if (format === 'zip') {
+    const zip = new JSZip();
+    const usedNames = new Set();
+    for (const page of result.pages) {
+      let name = page.slug;
+      if (usedNames.has(name)) {
+        let i = 2;
+        while (usedNames.has(name + '-' + i)) i++;
+        name = name + '-' + i;
+      }
+      usedNames.add(name);
+      zip.file(name + '.md', '# ' + page.title + '\n\n> Source: ' + page.url + '\n\n' + page.markdown);
+    }
+    blob = await zip.generateAsync({ type: 'blob' });
+  } else {
+    const sections = result.pages.map(p =>
+      '# ' + p.title + '\n\n> Source: ' + p.url + '\n\n' + p.markdown
+    );
+    blob = new Blob([sections.join('\n\n---\n\n')], { type: 'text/markdown' });
+  }
+
+  const blobUrl = URL.createObjectURL(blob);
+  try {
+    const downloadId = await chrome.downloads.download({
+      url: blobUrl, filename, saveAs: true,
+    });
+    if (!downloadId) throw new Error('Download failed to start');
+    return true;
+  } catch (err) {
+    showStatus('Download failed: ' + err.message, 'error');
+    sendMessage({ action: 'setIcon', color: 'red' });
+    return false;
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+  }
+}
+
+// ── Group Save (service worker handles fetching, popup handles conversion) ──
+
+let groupPort = null;
+let activeGroupBtn = null;
+let isPaused = false;
+let groupCancelled = false; // prevents queued messages from updating UI after cancel
+
+function setActiveBtn(format) {
+  activeGroupBtn = format === 'zip' ? btnSaveGroupZip : btnSaveGroupMd;
+}
+
+function setButtonDot(btn, color, text) {
+  btn.textContent = '';
+  const dot = document.createElement('span');
+  dot.className = 'status-dot';
+  dot.style.background = color;
+  dot.style.boxShadow = '0 0 5px 1px ' + color;
+  btn.appendChild(dot);
+  btn.appendChild(document.createTextNode(text));
+}
+
+function showFetchingUI(done, total, paused) {
+  btnSaveGroupMd.disabled = true;
+  btnSaveGroupZip.disabled = true;
+  progressRow.hidden = false;
+  progressBarWrap.hidden = false;
+  progressText.hidden = true;
+  progressFill.style.width = Math.round((done / total) * 100) + '%';
+  btnPause.hidden = false;
+  btnCancel.textContent = '\u2715';
+  btnCancel.className = 'btn-cancel';
+  btnCancel.title = 'Cancel';
+
+  groupCount.textContent = done + ' / ' + total;
+  groupCount.className = 'count-badge ' + (paused ? 'paused' : 'active');
+  progressFill.style.background = paused ? '#facc15' : '#0d9488';
+
+  if (activeGroupBtn) {
+    activeGroupBtn.classList.add('active-fetch');
+    const color = paused ? '#facc15' : '#2dd4bf';
+    setButtonDot(activeGroupBtn, color, paused ? 'Paused' : 'Fetching');
+  }
+
+  isPaused = paused;
+  btnPause.textContent = paused ? '\u25B6' : '\u23F8';
+  btnPause.title = paused ? 'Resume' : 'Pause';
+}
+
+function showCompletionUI(countText) {
+  progressRow.hidden = false;
+  progressBarWrap.hidden = true;
+  progressText.hidden = false;
+  progressText.textContent = countText;
+  btnPause.hidden = true;
+  btnCancel.textContent = '\u2713';
+  btnCancel.className = 'btn-cancel done';
+  btnCancel.title = '';
+  if (activeGroupBtn) {
+    setButtonDot(activeGroupBtn, '#4ade80', 'Complete');
+    activeGroupBtn.classList.add('success');
+  }
+}
+
+function resetGroupUI() {
+  // Disconnect port to stop queued messages from updating UI
+  if (groupPort) {
+    try { groupPort.disconnect(); } catch {}
+  }
+  btnSaveGroupMd.textContent = 'Save .md';
+  btnSaveGroupZip.textContent = 'Save .zip';
+  btnSaveGroupMd.classList.remove('success', 'active-fetch');
+  btnSaveGroupZip.classList.remove('success', 'active-fetch');
+  btnSaveGroupMd.disabled = false;
+  btnSaveGroupZip.disabled = false;
+  progressRow.hidden = true;
+  groupPort = null;
+  activeGroupBtn = null;
+  isPaused = false;
+  groupCancelled = false;
+  if (discoveredUrls.length > 0) {
+    groupCount.textContent = discoveredUrls.length + ' pages';
+  }
+}
+
+// Shared message handler for both fresh start and reconnect
+function attachGroupPortListeners() {
+  groupPort.onMessage.addListener(async (msg) => {
+    if (groupCancelled) return; // ignore queued messages after cancel
+    if (msg.action === 'state') {
+      if (msg.status === 'fetching' && msg.done > 0) {
+        setActiveBtn(msg.format);
+        isPaused = msg.paused;
+        showFetchingUI(msg.done, msg.total, msg.paused);
+      }
+    } else if (msg.action === 'progress') {
+      showFetchingUI(msg.done, msg.total, isPaused);
+    } else if (msg.action === 'fetchComplete') {
+      if (activeGroupBtn) activeGroupBtn.textContent = 'Converting...';
+      groupCount.textContent = 'Converting...';
+      groupPort.postMessage({ action: 'getResults' });
+    } else if (msg.action === 'results') {
+      const result = convertResults(msg.results);
+      if (result.pages.length === 0) {
+        showStatus('Failed to convert any pages', 'error');
+        sendMessage({ action: 'setIcon', color: 'red' });
+      } else {
+        const ok = await buildAndDownload(result, msg.format, msg.filename);
+        if (ok) {
+          const countText = result.failCount > 0
+            ? 'Saved ' + result.pages.length + ' of ' + result.total + ' pages'
+            : 'Saved ' + result.pages.length + ' pages';
+          showCompletionUI(countText);
+          sendMessage({ action: 'setIcon', color: 'green' });
+        }
+      }
+      groupPort.postMessage({ action: 'clear' });
+      groupPort = null;
+    }
+  });
+}
+
+function startGroupSave(format) {
+  if (format === 'md' && discoveredUrls.length > 50) {
+    if (!confirm('Saving a large number of pages to a single .md file may be slow to open or unstable. Consider using .zip instead.\n\nContinue with .md?')) {
+      return;
+    }
+  }
+
+  const ext = format === 'zip' ? '.zip' : '.md';
+  const filename = slugify(groupFilenameBase()) + ext;
+
+  setActiveBtn(format);
+  groupCancelled = false;
+  showFetchingUI(0, discoveredUrls.length, false);
+
+  sendMessage({ action: 'setIcon', color: 'teal' });
+  groupPort = chrome.runtime.connect({ name: 'groupSave' });
+  attachGroupPortListeners();
+  groupPort.postMessage({ action: 'start', urls: discoveredUrls, format, filename });
+}
+
+function resumeGroupProgress() {
+  groupPort = chrome.runtime.connect({ name: 'groupSave' });
+  attachGroupPortListeners();
+  // Service worker sends 'state' on connect if there's an active fetch
+}
+
+btnSaveGroupMd.addEventListener('click', () => startGroupSave('md'));
+btnSaveGroupZip.addEventListener('click', () => startGroupSave('zip'));
+
+btnPause.addEventListener('click', () => {
+  if (!groupPort) return;
+  if (isPaused) {
+    isPaused = false;
+    groupPort.postMessage({ action: 'resume' });
+    btnPause.textContent = '\u23F8';
+    btnPause.title = 'Pause';
+    if (activeGroupBtn) setButtonDot(activeGroupBtn, '#2dd4bf', 'Fetching');
+    groupCount.className = 'count-badge active';
+    progressFill.style.background = '#0d9488';
+    sendMessage({ action: 'setIcon', color: 'teal' });
+  } else {
+    isPaused = true;
+    groupPort.postMessage({ action: 'pause' });
+    btnPause.textContent = '\u25B6';
+    btnPause.title = 'Resume';
+    if (activeGroupBtn) setButtonDot(activeGroupBtn, '#facc15', 'Paused');
+    groupCount.className = 'count-badge paused';
+    progressFill.style.background = '#facc15';
+    sendMessage({ action: 'setIcon', color: 'yellow' });
+  }
+});
+
+btnCancel.addEventListener('click', () => {
+  if (btnCancel.classList.contains('done')) {
+    resetGroupUI();
+    return;
+  }
+  if (!groupPort) return;
+  // Block queued progress messages from updating UI while confirm is showing
+  groupCancelled = true;
+  if (!confirm('Stop fetching? All progress will be lost.')) {
+    groupCancelled = false;
+    return;
+  }
+  try {
+    groupPort.postMessage({ action: 'cancel' });
+    groupPort.postMessage({ action: 'clear' });
+  } catch {}
+  resetGroupUI();
+  // Flash "Cancelled" in the header count, then restore
+  groupCount.textContent = 'Cancelled';
+  groupCount.className = 'count-badge cancelled';
+  setTimeout(() => {
+    if (discoveredUrls.length > 0) {
+      groupCount.textContent = discoveredUrls.length + ' pages';
+    }
+    groupCount.className = 'count-badge';
+  }, 2000);
+  sendMessage({ action: 'setIcon', color: 'clear' });
 });
 
 btnLlmsCopy.addEventListener('click', async () => {
@@ -335,7 +594,7 @@ btnLlmsCopy.addEventListener('click', async () => {
   try {
     const origin = new URL(currentTab.url).origin;
     const resp = await sendMessage({ action: 'fetchLlmsTxt', origin });
-    if (resp && resp.error) { showStatus('Failed to fetch llms.txt', true); return; }
+    if (resp && resp.error) { showStatus('Failed to fetch llms.txt', 'error'); return; }
     await navigator.clipboard.writeText(resp.content);
     flashButton(btnLlmsCopy, 'Copied!');
   } finally { btnLlmsCopy.disabled = false; }
@@ -352,7 +611,7 @@ btnLlmsSave.addEventListener('click', async () => {
   try {
     const origin = new URL(currentTab.url).origin;
     const resp = await sendMessage({ action: 'fetchLlmsTxt', origin });
-    if (resp && resp.error) { showStatus('Failed to fetch llms.txt', true); return; }
+    if (resp && resp.error) { showStatus('Failed to fetch llms.txt', 'error'); return; }
     await writeToHandle(handle, resp.content, filename);
     flashButton(btnLlmsSave, 'Saved!');
   } finally { btnLlmsSave.disabled = false; }

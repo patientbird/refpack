@@ -44,9 +44,16 @@ amazon-advertising/
 └── refs/             # Clean markdown files
 ```
 
+## Browser Extension
+
+Convert pages to markdown and save groups of related pages directly from your browser. See [extension/README.md](extension/README.md) for details.
+
+**Install**: Load unpacked in Chrome (`chrome://extensions`) or Firefox (`about:debugging`) — point to the `extension/` folder.
+
 ## Roadmap
 
 - **v0.1** (current) — CLI tool, web/PDF/file sources, auto-discovery, concurrent fetching
+- **v0.1-ext** (current) — Browser extension: page-to-markdown, group save (.md/.zip), llms.txt detection
 - **v0.2** — IDE integrations: VS Code extension, Claude Code plugin (auto-load refpacks as context)
 - **v0.3** — Registry: publish, install, and search shared recipes (`refpack install react-docs`)
 - **v0.4** — Image support (`--include-images`): download charts/diagrams for vision-capable LLMs

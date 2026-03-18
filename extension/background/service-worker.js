@@ -26,13 +26,9 @@ async function checkLlmsTxt(origin) {
   } catch { return false; }
 }
 
-function updateBadge(tabId, found) {
-  if (found) {
-    chrome.action.setBadgeText({ text: '\u25CF', tabId });
-    chrome.action.setBadgeBackgroundColor({ color: '#22c55e', tabId });
-  } else {
-    chrome.action.setBadgeText({ text: '', tabId });
-  }
+function updateLlmsBadge(found) {
+  if (groupFetch && groupFetch.status === 'fetching') return;
+  // No icon change for llms.txt — keep default icon
 }
 
 // ─── Page Discovery (port of CLI discover.js) ───────────────────────────────
@@ -154,6 +150,130 @@ async function discoverPages(baseUrl) {
   return { urls: crawledUrls, method: 'crawl' };
 }
 
+// ─── Badge Status ───────────────────────────────────────────────────────────
+
+async function setIconStatus(color) {
+  const suffix = color === 'clear' ? '' : '-' + color;
+  try {
+    await chrome.action.setIcon({
+      path: {
+        16: '/icons/icon-16' + suffix + '.png',
+        32: '/icons/icon-32' + suffix + '.png',
+        48: '/icons/icon-48' + suffix + '.png',
+        128: '/icons/icon-128' + suffix + '.png',
+      }
+    });
+  } catch (err) {
+    console.error('setIcon failed:', err);
+  }
+  if (color === 'green' || color === 'red') {
+    setTimeout(() => setIconStatus('clear'), 5000);
+  }
+}
+
+// ─── Group Fetch (persists beyond popup close) ──────────────────────────────
+
+let groupFetch = null;
+
+function resetGroupFetch() { groupFetch = null; }
+
+async function runGroupFetch() {
+  const gf = groupFetch;
+  for (let i = gf.done; i < gf.urls.length; i++) {
+    if (gf.cancelled || gf.paused) return; // exit cleanly, don't mark done
+
+    const url = gf.urls[i];
+    try {
+      const resp = await fetch(url, {
+        signal: AbortSignal.timeout(15000),
+        headers: { 'Accept': 'text/html', 'User-Agent': USER_AGENT },
+      });
+      const contentType = resp.headers.get('content-type') || '';
+      if (resp.ok && contentType.includes('text/html')) {
+        gf.results.push({ url, html: await resp.text() });
+      } else {
+        gf.results.push({ url, error: 'HTTP ' + resp.status });
+      }
+    } catch (err) {
+      gf.results.push({ url, error: err.message });
+    }
+
+    gf.done = i + 1;
+    if (gf.port) {
+      try { gf.port.postMessage({ action: 'progress', done: gf.done, total: gf.total }); } catch {}
+    }
+
+    if (i < gf.urls.length - 1) await new Promise(r => setTimeout(r, CRAWL_DELAY_MS));
+  }
+
+  if (gf.cancelled) { setIconStatus('clear'); return; }
+  if (gf.paused) return; // paused on last iteration
+  gf.status = 'done';
+  if (gf.port) {
+    try { gf.port.postMessage({ action: 'fetchComplete' }); } catch {}
+  }
+}
+
+function sendState(port) {
+  if (!groupFetch) return;
+  port.postMessage({
+    action: 'state',
+    status: groupFetch.status,
+    done: groupFetch.done,
+    total: groupFetch.total,
+    format: groupFetch.format,
+    paused: groupFetch.paused,
+  });
+}
+
+chrome.runtime.onConnect.addListener(port => {
+  if (port.name !== 'groupSave') return;
+
+  if (groupFetch) {
+    groupFetch.port = port;
+    sendState(port);
+    if (groupFetch.status === 'done') {
+      port.postMessage({ action: 'fetchComplete' });
+    }
+  }
+
+  port.onMessage.addListener(msg => {
+    if (msg.action === 'start') {
+      groupFetch = {
+        status: 'fetching', done: 0, total: msg.urls.length, urls: msg.urls,
+        results: [], format: msg.format, filename: msg.filename, port,
+        cancelled: false, paused: false,
+      };
+      setIconStatus('teal');
+      runGroupFetch();
+    } else if (msg.action === 'pause') {
+      if (groupFetch) groupFetch.paused = true;
+    } else if (msg.action === 'resume') {
+      if (groupFetch && groupFetch.paused) {
+        groupFetch.paused = false;
+        runGroupFetch(); // restart loop from gf.done
+      }
+    } else if (msg.action === 'cancel') {
+      if (groupFetch) groupFetch.cancelled = true;
+    } else if (msg.action === 'getResults') {
+      if (groupFetch && groupFetch.status === 'done') {
+        port.postMessage({
+          action: 'results',
+          results: groupFetch.results,
+          format: groupFetch.format,
+          filename: groupFetch.filename,
+        });
+      }
+    } else if (msg.action === 'clear') {
+      resetGroupFetch();
+    }
+  });
+
+  port.onDisconnect.addListener(() => {
+    if (groupFetch) groupFetch.port = null;
+  });
+});
+
 // ─── Tab Listeners ───────────────────────────────────────────────────────────
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
@@ -162,7 +282,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     const origin = new URL(tab.url).origin;
     if (!origin.startsWith('http')) return;
     const found = await checkLlmsTxt(origin);
-    updateBadge(tabId, found);
+    updateLlmsBadge(found); // global badge, skipped during fetch
   } catch { /* skip */ }
 });
 
@@ -173,13 +293,19 @@ chrome.tabs.onActivated.addListener(async (tabId_info) => {
     const origin = new URL(tab.url).origin;
     if (!origin.startsWith('http')) return;
     const found = await checkLlmsTxt(origin);
-    updateBadge(tabId_info.tabId, found);
+    updateLlmsBadge(found); // global badge, skipped during fetch
   } catch { /* skip */ }
 });
 
 // ─── Message Handlers ────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.action === 'setIcon') {
+    setIconStatus(msg.color);
+    sendResponse({ ok: true });
+    return false;
+  }
+
   if (msg.action === 'checkLlmsTxt') {
     checkLlmsTxt(msg.origin).then(found => sendResponse({ found }));
     return true;

@@ -243,9 +243,8 @@ function convertHtmlString(html) {
 
 function getPageGroupLinks() {
   const currentUrl = new URL(window.location.href);
-  const pathParts = currentUrl.pathname.split('/').filter(Boolean);
-  pathParts.pop();
-  const prefix = pathParts.length > 0 ? '/' + pathParts.join('/') + '/' : '/';
+  const basePath = currentUrl.pathname.replace(/\/+$/, '') || '/';
+  const currentNormalized = currentUrl.origin + basePath;
 
   const seen = new Set();
   const links = [];
@@ -254,16 +253,20 @@ function getPageGroupLinks() {
     try {
       const linkUrl = new URL(a.href, window.location.href);
       if (linkUrl.origin !== currentUrl.origin) return;
-      if (!linkUrl.pathname.startsWith(prefix)) return;
-      const normalized = linkUrl.origin + linkUrl.pathname.replace(/\/+$/, '');
+      const linkPath = linkUrl.pathname.replace(/\/+$/, '') || '/';
+      // Match child pages: must be under basePath/ (like CLI's isUnderPath)
+      if (!(linkPath.startsWith(basePath + '/') || linkPath === basePath)) return;
+      const normalized = linkUrl.origin + linkPath;
+      // Skip the current page itself
+      if (normalized === currentNormalized) return;
       if (!seen.has(normalized)) {
         seen.add(normalized);
-        links.push({ url: normalized, text: a.textContent.trim() });
+        links.push(normalized);
       }
     } catch { /* skip */ }
   });
 
-  links.sort((a, b) => a.url.localeCompare(b.url));
+  links.sort();
   return links;
 }
 

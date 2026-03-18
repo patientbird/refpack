@@ -13,24 +13,40 @@
   </header>
 
   <section class="section">
-    <div class="label">Markdown</div>
+    <div class="label">Page</div>
     <div class="btn-row">
-      <button id="btn-copy" class="btn primary">Copy</button>
-      <button id="btn-save-page" class="btn">Save Page</button>
-      <button id="btn-save-group" class="btn count">Save Group <span id="group-count"></span></button>
+      <button id="btn-copy" class="btn">Copy</button>
+      <button id="btn-save-page" class="btn">Save .md</button>
+    </div>
+  </section>
+
+  <section class="section" id="group-section">
+    <div class="label">Group <span id="group-count" class="count-badge"></span></div>
+    <div class="btn-row">
+      <button id="btn-save-group-md" class="btn">Save .md</button>
+      <button id="btn-save-group-zip" class="btn">Save .zip</button>
+    </div>
+    <div id="progress-row" class="progress-row" hidden>
+      <div id="progress-bar-wrap" class="progress-bar">
+        <div id="progress-fill" class="progress-fill"></div>
+      </div>
+      <span id="progress-text" class="progress-text" hidden></span>
+      <button id="btn-pause" class="btn-action" title="Pause">&#x23F8;</button>
+      <button id="btn-cancel" class="btn-cancel" title="Cancel">&#x2715;</button>
     </div>
   </section>
 
   <section class="section" id="llms-section">
     <div class="label">llms.txt <span id="llms-dot" class="dot"></span></div>
     <div class="btn-row">
-      <button id="btn-llms-copy" class="btn primary" disabled>Copy</button>
-      <button id="btn-llms-save" class="btn" disabled>Save</button>
+      <button id="btn-llms-copy" class="btn" disabled>Copy</button>
+      <button id="btn-llms-save" class="btn" disabled>Save .txt</button>
     </div>
   </section>
 
   <div id="status" class="status" hidden></div>
 
+  <script src="../lib/jszip.min.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
